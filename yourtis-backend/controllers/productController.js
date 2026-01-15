@@ -1,115 +1,122 @@
-const Product = require("../models/productModel");
+const db = require("../config/database");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 
-// --- KONFIGURASI UPLOAD GAMBAR (MULTER) ---
+// --- 1. KONFIGURASI MULTER (UPLOAD GAMBAR) ---
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    // Pastikan folder 'uploads' sudah ada
-    const dir = "./uploads";
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir);
+    const uploadPath = "./uploads";
+    // Buat folder jika belum ada
+    if (!fs.existsSync(uploadPath)) {
+      fs.mkdirSync(uploadPath);
     }
-    cb(null, "uploads/"); // Simpan di folder uploads
+    cb(null, uploadPath);
   },
   filename: (req, file, cb) => {
-    // Rename file agar unik: timestamp + nama asli
+    // Format nama file: timestamp-namaasli.jpg
     cb(null, Date.now() + path.extname(file.originalname));
   },
 });
 
-// Filter agar hanya menerima gambar
-const fileFilter = (req, file, cb) => {
-  if (
-    file.mimetype === "image/jpeg" ||
-    file.mimetype === "image/png" ||
-    file.mimetype === "image/jpg"
-  ) {
-    cb(null, true);
-  } else {
-    cb(new Error("Format file harus JPG/PNG"), false);
-  }
-};
+const upload = multer({ storage: storage });
 
-const upload = multer({ storage: storage, fileFilter: fileFilter });
-
-// Export middleware upload agar bisa dipakai di Route
+// Export Middleware Upload untuk dipakai di Route
 exports.uploadMiddleware = upload.single("gambar");
 
-// --- LOGIKA BISNIS CRUD ---
-
-// 1. GET ALL (Lihat Katalog)
+// --- 2. GET ALL PRODUCTS (READ) ---
 exports.getAllProducts = (req, res) => {
-  Product.getAll((err, products) => {
-    if (err) return res.status(500).json({ message: "Error mengambil data." });
-
-    // Format ulang response agar URL gambar lengkap
-    // Contoh: "wortel.jpg" menjadi "http://localhost:3000/uploads/wortel.jpg"
-    const productsWithImageURL = products.map((item) => ({
-      ...item,
-      gambar_url: item.gambar
-        ? `${req.protocol}://${req.get("host")}/uploads/${item.gambar}`
-        : null,
-    }));
-
-    res.json(productsWithImageURL);
+  const query = "SELECT * FROM tb_sayur ORDER BY id_sayur DESC";
+  db.query(query, (err, results) => {
+    if (err) {
+      return res
+        .status(500)
+        .json({ message: "Gagal mengambil data", error: err });
+    }
+    res.status(200).json(results);
   });
 };
 
-// 2. CREATE (Tambah Sayur)
+// --- 3. CREATE PRODUCT (INSERT) ---
 exports.createProduct = (req, res) => {
+  const { id_petani, nama_sayur, harga, stok, deskripsi } = req.body;
+
+  // Validasi Gambar
   if (!req.file) {
-    return res.status(400).json({ message: "Harap upload gambar produk!" });
+    return res.status(400).json({ message: "Gambar wajib diupload" });
   }
 
-  const newProduct = {
-    id_petani: req.body.id_petani, // Didapat dari input form (seharusnya otomatis dari sesi login)
-    nama_sayur: req.body.nama_sayur,
-    harga: req.body.harga,
-    stok: req.body.stok,
-    deskripsi: req.body.deskripsi,
-    gambar: req.file.filename, // Nama file yang tersimpan di server
-  };
+  const gambar = req.file.filename;
+  // URL agar bisa diakses dari Android (http://ip:port/uploads/namafile.jpg)
+  const gambar_url = `${req.protocol}://${req.get("host")}/uploads/${gambar}`;
 
-  Product.create(newProduct, (err, result) => {
-    if (err)
+  const query = `INSERT INTO tb_sayur (id_petani, nama_sayur, harga, stok, deskripsi, gambar, gambar_url) VALUES (?, ?, ?, ?, ?, ?, ?)`;
+  const values = [
+    id_petani,
+    nama_sayur,
+    harga,
+    stok,
+    deskripsi,
+    gambar,
+    gambar_url,
+  ];
+
+  db.query(query, values, (err, result) => {
+    if (err) {
       return res
         .status(500)
-        .json({ message: "Gagal menyimpan produk.", error: err });
-    res
-      .status(201)
-      .json({ message: "Sayur berhasil ditambahkan!", data: result });
+        .json({ message: "Gagal simpan produk", error: err });
+    }
+    res.status(201).json({ message: "Produk berhasil ditambahkan" });
   });
 };
 
-// 3. UPDATE (Edit Sayur)
+// --- 4. UPDATE PRODUCT (EDIT) - FITUR BARU ---
 exports.updateProduct = (req, res) => {
   const id = req.params.id;
+  const { nama_sayur, harga, stok, deskripsi } = req.body;
 
-  const updateData = {
-    nama_sayur: req.body.nama_sayur,
-    harga: req.body.harga,
-    stok: req.body.stok,
-    deskripsi: req.body.deskripsi,
-    gambar: req.file ? req.file.filename : null, // Cek apakah user upload gambar baru
-  };
+  let query = "";
+  let values = [];
 
-  Product.update(id, updateData, (err, result) => {
-    if (err)
+  // Cek apakah user mengupload gambar baru?
+  if (req.file) {
+    // SKENARIO 1: Ada Gambar Baru -> Update semua kolom termasuk gambar
+    const gambar = req.file.filename;
+    const gambar_url = `${req.protocol}://${req.get("host")}/uploads/${gambar}`;
+
+    query =
+      "UPDATE tb_sayur SET nama_sayur=?, harga=?, stok=?, deskripsi=?, gambar=?, gambar_url=? WHERE id_sayur=?";
+    values = [nama_sayur, harga, stok, deskripsi, gambar, gambar_url, id];
+  } else {
+    // SKENARIO 2: Tidak Ada Gambar Baru -> Hanya update data teks, gambar lama tetap
+    query =
+      "UPDATE tb_sayur SET nama_sayur=?, harga=?, stok=?, deskripsi=? WHERE id_sayur=?";
+    values = [nama_sayur, harga, stok, deskripsi, id];
+  }
+
+  db.query(query, values, (err, result) => {
+    if (err) {
+      console.error("Error update:", err);
       return res
         .status(500)
-        .json({ message: "Gagal update produk.", error: err });
-    res.json({ message: "Sayur berhasil diperbarui!" });
+        .json({ message: "Gagal update produk", error: err });
+    }
+    res.status(200).json({ message: "Produk berhasil diupdate" });
   });
 };
 
-// 4. DELETE (Hapus Sayur)
+// --- 5. DELETE PRODUCT (HAPUS) ---
 exports.deleteProduct = (req, res) => {
   const id = req.params.id;
-  Product.delete(id, (err, result) => {
-    if (err)
-      return res.status(500).json({ message: "Gagal menghapus produk." });
-    res.json({ message: "Sayur berhasil dihapus!" });
+  const query = "DELETE FROM tb_sayur WHERE id_sayur = ?";
+
+  db.query(query, [id], (err, result) => {
+    if (err) {
+      return res
+        .status(500)
+        .json({ message: "Gagal hapus produk", error: err });
+    }
+    res.status(200).json({ message: "Produk berhasil dihapus" });
   });
 };
