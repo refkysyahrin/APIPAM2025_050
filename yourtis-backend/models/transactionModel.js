@@ -1,49 +1,43 @@
 const db = require("../config/database");
 
 const Transaction = {
-  // 1. Simpan Header Transaksi (Nota)
-  createHeader: (data, callback) => {
-    const query =
-      "INSERT INTO tb_transaksi (id_transaksi, id_pembeli, total_bayar, metode_kirim, metode_bayar, status) VALUES (?, ?, ?, ?, ?, ?)";
-    const values = [
-      data.id_transaksi,
-      data.id_pembeli,
-      data.total_bayar,
-      data.metode_kirim,
-      data.metode_kirim === "Pickup" ? "Transfer" : data.metode_bayar, // Logika sederhana
-      "Pending",
-    ];
-    db.query(query, values, (err, result) => {
-      if (err) return callback(err, null);
-      return callback(null, result);
-    });
+  // 1. Ambil Semua Transaksi
+  getAll: (callback) => {
+    const query = "SELECT * FROM tb_transaksi ORDER BY tgl_transaksi DESC";
+    db.query(query, callback);
   },
 
-  // 2. Simpan Detail Transaksi (Looping item keranjang)
-  createDetail: (items, id_transaksi, callback) => {
-    // Kita siapkan array untuk Bulk Insert agar lebih efisien
-    const values = items.map((item) => [
-      id_transaksi,
-      item.id_sayur,
-      item.qty,
-      item.subtotal,
-    ]);
+  // 2. Simpan Header Transaksi
+  create: (data, callback) => {
+    const query = `
+            INSERT INTO tb_transaksi (id_transaksi, id_pembeli, total_bayar, metode_kirim, metode_bayar, status)
+            VALUES (?, ?, ?, ?, ?, 'Pending')
+        `;
+    db.query(
+      query,
+      [
+        data.id_transaksi,
+        data.id_pembeli,
+        data.total_bayar,
+        data.metode_kirim,
+        data.metode_bayar,
+      ],
+      callback
+    );
+  },
+
+  // 3. Simpan Detail Item (Looping/Bulk Insert)
+  createDetail: (values, callback) => {
     const query =
       "INSERT INTO tb_detail_transaksi (id_transaksi, id_sayur, qty, subtotal) VALUES ?";
-
-    db.query(query, [values], (err, result) => {
-      if (err) return callback(err, null);
-      return callback(null, result);
-    });
+    db.query(query, [values], callback);
   },
 
-  // 3. Kurangi Stok Sayur (Otomatis saat checkout)
-  decreaseStock: (items) => {
-    items.forEach((item) => {
-      const query = "UPDATE tb_sayur SET stok = stok - ? WHERE id_sayur = ?";
-      db.query(query, [item.qty, item.id_sayur], (err, result) => {
-        if (err) console.error("Gagal update stok id " + item.id_sayur);
-      });
+  // 4. Update Stok Sayur
+  updateStock: (id_sayur, qty) => {
+    const query = "UPDATE tb_sayur SET stok = stok - ? WHERE id_sayur = ?";
+    db.query(query, [qty, id_sayur], (err, res) => {
+      if (err) console.error("Gagal update stok:", err);
     });
   },
 };
