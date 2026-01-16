@@ -1,6 +1,5 @@
 const db = require("../config/database");
 
-// CHECKOUT dengan Pengurangan Stok Otomatis
 exports.checkout = (req, res) => {
   const {
     id_pembeli,
@@ -14,57 +13,61 @@ exports.checkout = (req, res) => {
   db.beginTransaction((err) => {
     if (err) return res.status(500).json({ message: "Gagal transaksi" });
 
-    // 1. Simpan Header Transaksi
     const qTx =
       "INSERT INTO tb_transaksi (id_pembeli, total_bayar, metode_kirim, metode_bayar, status, alamat_pengiriman, tgl_transaksi) VALUES (?, ?, ?, ?, 'Proses', ?, NOW())";
+
     db.query(
       qTx,
       [id_pembeli, total_bayar, metode_kirim, metode_bayar, alamat_pengiriman],
       (err, result) => {
-        if (err) return db.rollback(() => res.status(500).json(err));
+        if (err) return db.rollback(() => res.status(500).json({ error: err }));
 
         const id_transaksi = result.insertId;
+
+        // PERBAIKAN: Pastikan items dipetakan dengan benar untuk query "VALUES ?"
         const detailValues = items.map((i) => [
           id_transaksi,
-          i.id_sayur,
-          i.qty,
-          i.subtotal,
+          parseInt(i.id_sayur), // Pastikan integer
+          parseInt(i.qty),
+          parseInt(i.subtotal),
         ]);
 
-        // 2. Simpan Detail Transaksi
-        db.query(
-          "INSERT INTO tb_detail_transaksi (id_transaksi, id_sayur, qty, subtotal) VALUES ?",
-          [detailValues],
-          (errD) => {
-            if (errD) return db.rollback(() => res.status(500).json(errD));
+        const qDetail =
+          "INSERT INTO tb_detail_transaksi (id_transaksi, id_sayur, qty, subtotal) VALUES ?";
 
-            // 3. Update Stok Otomatis (REQ-TRX-04)
-            const updates = items.map((item) => {
-              return new Promise((resolve, reject) => {
-                db.query(
-                  "UPDATE tb_sayur SET stok = stok - ? WHERE id_sayur = ?",
-                  [item.qty, item.id_sayur],
-                  (errS) => {
-                    if (errS) reject(errS);
-                    else resolve();
-                  }
-                );
-              });
+        db.query(qDetail, [detailValues], (errD) => {
+          if (errD)
+            return db.rollback(() => res.status(500).json({ error: errD }));
+
+          // Update Stok
+          const updates = items.map((item) => {
+            return new Promise((resolve, reject) => {
+              db.query(
+                "UPDATE tb_sayur SET stok = stok - ? WHERE id_sayur = ?",
+                [item.qty, item.id_sayur],
+                (errS) => {
+                  if (errS) reject(errS);
+                  else resolve();
+                }
+              );
             });
+          });
 
-            Promise.all(updates)
-              .then(() => {
-                db.commit((errC) => {
-                  if (errC)
-                    return db.rollback(() => res.status(500).json(errC));
-                  res
-                    .status(201)
-                    .json({ message: "Pesanan Berhasil", id_transaksi });
-                });
-              })
-              .catch((e) => db.rollback(() => res.status(500).json(e)));
-          }
-        );
+          Promise.all(updates)
+            .then(() => {
+              db.commit((errC) => {
+                if (errC) return db.rollback(() => res.status(500).json(errC));
+                res
+                  .status(201)
+                  .json({ message: "Pesanan Berhasil", id_transaksi });
+              });
+            })
+            .catch((e) =>
+              db.rollback(() =>
+                res.status(500).json({ error: "Gagal update stok" })
+              )
+            );
+        });
       }
     );
   });
