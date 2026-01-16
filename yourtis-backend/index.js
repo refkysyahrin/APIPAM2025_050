@@ -27,44 +27,51 @@ app.post("/api/auth/login", authController.login);
 app.post("/api/auth/register", authController.register);
 
 // 2. PRODUCT ROUTES (CRUD SAYUR)
-// Read (Ambil Semua)
 app.get("/api/products", productController.getAllProducts);
+app.get("/api/products/:id", productController.getProductById); // Detail produk
 
-// Create (Tambah Baru - Pakai Middleware Upload)
 app.post(
   "/api/products",
   productController.uploadMiddleware,
   productController.createProduct
 );
 
-// Update (Edit Produk - Pakai Middleware Upload karena bisa ganti gambar) -> ROUTE BARU
 app.put(
   "/api/products/:id",
   productController.uploadMiddleware,
   productController.updateProduct
 );
 
-// Delete (Hapus)
 app.delete("/api/products/:id", productController.deleteProduct);
 
 // 3. TRANSACTION ROUTES
-// Ambil Semua Transaksi (Untuk Dashboard Petani)
+// Ambil Semua Transaksi (Dashboard Petani)
 app.get("/api/transactions", transactionController.getAllTransactions);
+
+// Ambil Riwayat Per Pembeli (Laporan Pembeli)
+app.get(
+  "/api/transactions/user/:id_pembeli",
+  transactionController.getTransactionsByPembeli
+);
 
 // Checkout (Untuk Pembeli)
 app.post("/api/transactions/checkout", transactionController.checkout);
 
-// Update Status Transaksi (Pending -> Selesai)
+// Update Status Transaksi (Petani mengelola pesanan)
 app.put("/api/transactions/:id", transactionController.updateStatus);
+
+app.get(
+  "/api/transactions/detail/:id",
+  transactionController.getTransactionDetail
+);
 
 // ==========================================
 
-// Cek Koneksi Server
 app.get("/", (req, res) => {
   res.send("Server YourTis Berjalan...");
 });
 
-// Jalankan Server
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+// Menggunakan "0.0.0.0" agar emulator Android bisa akses via IP lokal
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server YourTis running on http://localhost:${PORT}`);
 });
